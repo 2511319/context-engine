@@ -1,0 +1,41 @@
+project: context_engine
+
+observability:
+  config_ttl_seconds: 30
+  plan_id: true
+
+retrieval:
+  mode: hybrid            # vector | lexical | hybrid
+  lexical_config: simple  # overridable per project
+  weights: { vector: 0.7, bm25: 0.3 }
+  candidates: { vector_k: 120, bm25_k: 120 }
+  rerank:
+    enabled: false
+    top_n: 50
+    latency_budget_ms: 200
+
+defaults:
+  graph_depth: 3
+  max_code_chunks: 8
+  max_doc_chunks: 5
+
+routing:
+  rules:
+    - name: gateway_api
+      priority: 100
+      match:
+        mode: keyword          # keyword | regex | glob
+        any:  ["gateway", "auth", "jwt", "initdata", "mini app"]
+        none: ["legacy", "deprecated"]
+      module: "services/gateway_api"
+      docs: ["API Contracts"]
+      contracts: ["InitDataAuth"]
+
+    - name: party_sync
+      priority: 90
+      match:
+        mode: keyword
+        any: ["party", "sync", "ws", "realtime"]
+      module: "services/party_sync"
+      docs: ["Networking Layer"]
+

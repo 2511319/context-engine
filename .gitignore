@@ -1,0 +1,40 @@
+# Python / IDE
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.swp
+*.swo
+*.log
+*.sqlite3
+.pytest_cache/
+
+# Virtual environments
+.venv/
+
+# Environment files
+.env
+.env.local
+.env.*
+!.env.example
+
+# Build artifacts / caches
+_build/
+logs/
+tmp/
+*.lock
+*.pid
+*.seed
+
+# Node / frontend
+ui/node_modules/
+ui/.vite/
+ui/dist/
+
+# Databases / runtime state
+.pgdata/
+logs/ 
+
+# Misc
+.DS_Store
+Thumbs.db

@@ -1,0 +1,1 @@
+"""Pydantic models shared between routers and services."""

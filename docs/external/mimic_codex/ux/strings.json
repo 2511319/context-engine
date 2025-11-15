@@ -1,0 +1,71 @@
+{
+  "app.status.loading": "Загружаем…",
+  "app.status.ready": "Готово",
+
+  "nav.home": "Главная",
+  "nav.campaigns": "Кампании",
+  "nav.settings": "Настройки",
+
+  "auth.loading": "Проверяем данные запуска…",
+  "auth.unauthorized.title": "Нет доступа",
+  "auth.unauthorized.body": "Открой Mini App из чата Telegram.",
+  "auth.error.title": "Не удалось подтвердить запуск",
+  "auth.error.cta": "Повторить",
+  "auth.ready.cta": "Продолжить",
+
+  "campaigns.empty.title": "У тебя ещё нет кампаний",
+  "campaigns.empty.body": "Создай первую кампанию и начни приключение.",
+  "campaigns.empty.cta": "Создать кампанию",
+  "campaigns.list.title": "Выбери кампанию",
+  "campaigns.error": "Не вышло загрузить кампании. Попробуй снова.",
+
+  "scene.loading": "Готовим сцену…",
+  "scene.empty.title": "Здесь пока пусто",
+  "scene.empty.body": "Создай первую сцену в редакторе.",
+  "scene.error": "Не вышло сгенерировать сцену. Повторим?",
+  "scene.choice.more": "Ещё",
+
+  "choices.pick": "Выбрать",
+  "choices.alt": "Другой вариант",
+
+  "combat.turn": "Ход №{n}",
+  "combat.error": "Сбой расчёта боя. Повторить?",
+  "combat.cta.attack": "Атака",
+  "combat.cta.defend": "Защита",
+  "combat.cta.items": "Предметы",
+
+  "loot.empty.title": "Пока пусто",
+  "loot.empty.body": "Добудь лут в приключениях.",
+  "loot.title": "Твои предметы",
+  "loot.cta.use": "Использовать",
+  "loot.cta.compare": "Сравнить",
+
+  "search.placeholder": "Поиск по лору, NPC, локациям…",
+  "search.no_results": "Ничего не найдено. Попробуй другой запрос или теги.",
+  "search.error": "Сервис поиска недоступен. Повтори позже.",
+
+  "media.loading": "Генерируем медиа…",
+  "media.done.toast": "Медиа готово",
+  "media.error": "Не удалось получить медиа. Повторим?",
+  "media.cta.open": "Открыть",
+
+  "ws.status.connected": "Онлайн",
+  "ws.status.connecting": "Пытаемся подключиться…",
+  "ws.status.disconnected": "Связь потеряна. Пытаемся подключиться…",
+
+  "retcon.banner": "Сцена обновлена ретконом",
+  "retcon.cta.view_diff": "Показать изменения",
+  "retcon.cta.apply": "Применить",
+  "retcon.cta.cancel": "Отмена",
+  "retcon.toast.applied": "Откат выполнен",
+  "retcon.toast.rejected": "Откат отклонён",
+
+  "errors.common_retry": "Что-то пошло не так. Попробуй ещё раз.",
+  "errors.network": "Не получается подключиться. Проверь интернет.",
+  "errors.init": "Сбой инициализации. Повтори попытку.",
+  "errors.details": "Подробнее",
+  "errors.correlation_id": "Код ошибки: {id}",
+
+  "badges.ai": "ИИ",
+  "labels.generated_by_ai": "Сгенерировано ИИ"
+}

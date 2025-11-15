@@ -1,0 +1,45 @@
+version: "3.9"
+
+services:
+  pg:
+    image: ankane/pgvector:latest
+    container_name: context-engine-pg
+    environment:
+      - POSTGRES_USER=codex
+      - POSTGRES_PASSWORD=codex
+      - POSTGRES_DB=codex
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./_data/pg:/var/lib/postgresql/data
+
+  neo4j:
+    image: neo4j:5
+    container_name: context-engine-neo4j
+    environment:
+      - NEO4J_AUTH=neo4j/codex
+      - NEO4J_PLUGINS=["apoc","graph-data-science"]
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - ./_data/neo4j/data:/data
+      - ./_data/neo4j/logs:/logs
+      - ./_data/neo4j/plugins:/plugins
+
+  # context-engine service будет добавлен после реализации сервера
+  # context-engine:
+  #   build: .
+  #   env_file: .env
+  #   environment:
+  #     - OPENAI_API_KEY
+  #     - PG_DSN
+  #     - NEO4J_URI
+  #     - NEO4J_USER
+  #     - NEO4J_PASS
+  #   volumes:
+  #     - ./logs:/app/logs
+  #   depends_on:
+  #     - pg
+  #     - neo4j
+
