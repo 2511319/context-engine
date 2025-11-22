@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from .pg import PgClient
+from core.dal.repos.code_repo import CodeRepo
 
 logger = logging.getLogger(__name__)
 
@@ -73,10 +73,10 @@ def apply_rules(task: str, rules: Iterable[Rule]) -> Optional[str]:
     return best[2] if best else None
 
 
-def heuristic_module(task: str, pg: PgClient, project: str, neo_modules: List[str]) -> Optional[str]:
+def heuristic_module(task: str, code_repo: CodeRepo, project: str, neo_modules: List[str]) -> Optional[str]:
     tokens = tokenize(task)
     # S1: tokens vs module paths from PG
-    pg_modules = pg.list_modules(project)
+    pg_modules = code_repo.list_modules(project)
     s1_scores: Dict[str, float] = {}
     for m in pg_modules:
         lm = m.lower()

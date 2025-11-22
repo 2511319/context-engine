@@ -21,7 +21,7 @@ def main() -> None:
 
     steps = [
         [python, str(root / "tools" / "index_repo.py"), "--project", args.project],
-        [python, str(root / "tools" / "memify.py")],
+        [python, str(root / "tools" / "memify.py"), "--project", args.project],
         [python, str(root / "tools" / "graphify.py"), "--project", args.project],
     ]
 

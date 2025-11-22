@@ -1,0 +1,9 @@
+project: context_engine
+
+observability:
+  config_ttl_seconds: 30
+
+routing:
+  rules: []
+
+sensitive: []

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Box,
@@ -9,12 +9,14 @@ import {
   Divider,
   Grid,
   Stack,
+  TextField,
   Typography
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 import { apiGet, API_BASE } from "../api/client";
 import { useSearchParams } from "react-router-dom";
 import { useProject } from "../context/ProjectContext";
+import RefreshIcon from "@mui/icons-material/Refresh";
 
 export type JobItem = {
   job_id: string;
@@ -30,9 +32,16 @@ export type JobItem = {
   log_path?: string | null;
 };
 
-async function fetchJobs(project: string): Promise<JobItem[]> {
-  const data = await apiGet<{ jobs: JobItem[] }>(`/jobs?project=${encodeURIComponent(project)}`);
-  return data.jobs ?? [];
+type JobsResponse = { jobs: JobItem[]; total: number; limit: number; offset: number };
+
+async function fetchJobs(project: string, status: string, type: string, limit: number, offset: number): Promise<JobsResponse> {
+  const params = new URLSearchParams();
+  params.set("project", project);
+  if (status) params.set("status", status);
+  if (type) params.set("type", type);
+  params.set("limit", String(limit));
+  params.set("offset", String(offset));
+  return await apiGet<JobsResponse>(`/api/admin/jobs?${params.toString()}`);
 }
 
 async function fetchLog(jobId: string): Promise<string> {
@@ -79,11 +88,22 @@ function JobsPage(): JSX.Element {
   const [selectedJob, setSelectedJob] = useState<JobItem | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const jobQuery = searchParams.get("job");
-  const { data: jobs = [], isLoading, error } = useQuery({
-    queryKey: ["jobs", project],
-    queryFn: () => fetchJobs(project),
+  const [filters, setFilters] = useState<{ status: string; type: string; offset: number; limit: number }>({
+    status: "",
+    type: "",
+    offset: 0,
+    limit: 50,
+  });
+  const { data, isLoading, error, refetch, isRefetching } = useQuery({
+    queryKey: ["jobs", project, filters.status, filters.type, filters.offset, filters.limit],
+    queryFn: () => fetchJobs(project, filters.status, filters.type, filters.limit, filters.offset),
     refetchInterval: 5000
   });
+  const jobs = data?.jobs ?? [];
+  const total = data?.total ?? jobs.length;
+  const filteredJobs = useMemo(() => jobs, [jobs]);
+  const hasPrev = filters.offset > 0;
+  const hasNext = filters.offset + jobs.length < total;
 
   useEffect(() => {
     if (!jobQuery || selectedJob) {
@@ -133,7 +153,8 @@ function JobsPage(): JSX.Element {
   const selectedLogQuery = useQuery({
     queryKey: ["job-log", selectedJob?.job_id],
     queryFn: async () => await fetchLog(selectedJob!.job_id),
-    enabled: Boolean(selectedJob?.job_id)
+    enabled: Boolean(selectedJob?.job_id),
+    refetchInterval: selectedJob && selectedJob.status === "running" ? 2000 : false
   });
 
   if (isLoading) return <CircularProgress />;
@@ -144,8 +165,55 @@ function JobsPage(): JSX.Element {
       <Grid item xs={12} md={4}>
         <Stack spacing={2}>
           <Typography variant="h4">Background Jobs</Typography>
+          <Stack direction="row" spacing={1}>
+            <TextField
+              size="small"
+              label="Status"
+              value={filters.status}
+              onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value }))}
+              placeholder="queued/running/success/failed"
+            />
+            <TextField
+              size="small"
+              label="Type"
+              value={filters.type}
+              onChange={(e) => setFilters((prev) => ({ ...prev, type: e.target.value }))}
+              placeholder="jobs.ingest"
+            />
+            <Chip
+              icon={<RefreshIcon fontSize="small" />}
+              label="Reset"
+              variant="outlined"
+              onClick={() => setFilters((prev) => ({ ...prev, status: "", type: "", offset: 0 }))}
+            />
+            <Chip
+              icon={<RefreshIcon fontSize="small" />}
+              label={isRefetching ? "Refreshing..." : "Refresh"}
+              variant="outlined"
+              onClick={() => refetch()}
+            />
+          </Stack>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Button
+              size="small"
+              disabled={!hasPrev}
+              onClick={() => setFilters((prev) => ({ ...prev, offset: Math.max(0, prev.offset - prev.limit) }))}
+            >
+              Prev
+            </Button>
+            <Button
+              size="small"
+              disabled={!hasNext}
+              onClick={() => setFilters((prev) => ({ ...prev, offset: prev.offset + prev.limit }))}
+            >
+              Next
+            </Button>
+            <Typography variant="body2" color="text.secondary">
+              {filters.offset + 1}–{filters.offset + jobs.length} из {total}
+            </Typography>
+          </Stack>
           {jobs.length === 0 && <Typography>No jobs yet</Typography>}
-          {jobs.map((job) => (
+          {filteredJobs.map((job) => (
             <JobCard key={job.job_id} job={job} onSelect={handleSelectJob} />
           ))}
         </Stack>

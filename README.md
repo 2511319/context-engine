@@ -13,7 +13,8 @@ MCP‑совместимый сервер, который по тексту за
 | `schemas/sql/*.sql` | миграции PostgreSQL (pgvector, GIN) |
 | `schemas/cypher/*.cql` | ограничения и индексы Neo4j |
 | `tools/*.py` | индексатор репозитория, memify, graphify, task fingerprint |
-| `scripts/*.ps1` | установка зависимостей, pgvector, подготовка БД, настройка Neo4j |
+| `scripts/*.ps1` | (удалены, заменены CLI) |
+| `manage.py` | Python CLI для ingest/graph/health |
 | `tests/` | pytest‑покрытие (`test_task_fp.py`) |
 
 ## Размещение инфраструктуры (диск D:)
@@ -33,33 +34,29 @@ MCP‑совместимый сервер, который по тексту за
   & "$pg\bin\pg_ctl.exe" -D "D:\infra\postgresql\cluster\data" stop -m fast
   ```
 - Роль/БД: `codex/codex`, `PG_DSN=postgres://codex:codex@127.0.0.1:5432/codex`.
-- Миграции: `powershell -ExecutionPolicy Bypass -File scripts/apply_migrations.ps1` (подтянет `schemas/sql/*.sql`).
+- Миграции: применяйте `schemas/sql/*.sql` вручную через psql (`psql -f schemas/sql/000_init.sql`, затем `psql -f schemas/sql/010_pgvector_hnsw.sql`, `psql -f schemas/sql/020_chunk_uri.sql`, `psql -f schemas/sql/021_uri_symbols_edges.sql`).
 
 ### Neo4j Community 5.22
 - Корень: `D:\infra\neo4j\server`.
 - Сервис Windows установлен командой `neo4j.bat windows-service install`, старт/стоп: `neo4j.bat start|stop`.
 - Пользователь `neo4j`, пароль `codex1234`.
-- Fallback скрипт `scripts/neo4j_setup.ps1` скачивает архив в `D:\infra\neo4j` и применяет `schemas/cypher/*.cql`.
+- Примените `schemas/cypher/*.cql` вручную через `cypher-shell` (ps1-скрипты удалены).
 
 ## Подготовка окружения разработчика
-1. Python 3.12+ 64‑bit.
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File install.ps1
-   .\.venv\Scripts\Activate.ps1
-   ```
+1. Python 3.12+ 64‑bit. Установка зависимостей: `python -m venv .venv && .\.venv\Scripts\activate && pip install -r requirements.txt`. (install.ps1 удалён.)
 2. Настройте `.env` (см. `.env.example`): `OPENAI_API_KEY`, `PG_DSN`, `NEO4J_*`.
 3. Убедитесь, что Postgres и Neo4j подняты (см. команды выше). MCP сервер умеет проверять их доступность.
-4. Индексация репозитория (повторять при изменении кода/доков):
+4. Индексация репозитория (повторять при изменении кода/доков) — через CLI:
    ```powershell
-   python tools/index_repo.py --project context_engine
-   python tools/memify.py
-   python tools/graphify.py --project context_engine --dry-run
-   python tools/graphify.py --project context_engine
+   python manage.py ingest --project context_engine
+   # отдельно graphify при необходимости
+   python manage.py build-graph --project context_engine --dry-run
+   python manage.py build-graph --project context_engine
    ```
-   `tools/index_repo.py` автоматически использует `git ls-files` либо падает на `os.walk` и исключает технические директории (`.venv`, `_data`, `logs`, `node_modules`, и т. д.).
+   Оригинальные скрипты `tools/index_repo.py`/`memify.py`/`graphify.py` остаются, но рекомендуется использовать CLI.
 5. Тесты: `python -m pytest`.
-6. MCP сервер (stdio): `python mcp/server.py`. Инструменты: `get_context`, `search_raw`, `ingest`, `pin`, `forget`, `explain_plan`.
-7. При необходимости автоматического старта всего стека используйте `scripts/start_context_engine_stack.ps1`. Скрипт поднимает MCP‑сервер, backend (uvicorn `api.main:app`) и, опционально, Vite dev‑сервер. Его можно повесить на Startup так же, как `start_context_engine_mcp.ps1`.
+6. MCP сервер (stdio): `python mcp/server.py`. Инструменты: `get_context`, `search_raw`, `ingest`, `pin`, `forget`, `explain_plan`. Для фоновых задач/ингеста используйте `python manage.py …`.
+7. Автостарт ps1-скриптов убран; для автозапуска создавайте ярлыки/службы, вызывающие `python manage.py …` и `uvicorn api.main:app`.
 
 ## Переменные окружения (`.env.example`)
 - `OPENAI_API_KEY`
@@ -68,14 +65,29 @@ MCP‑совместимый сервер, который по тексту за
 - `NEO4J_USER=neo4j`
 - `NEO4J_PASS=codex1234`
 
+## URI и dp_edge (ТЗ-2 базовые форматы)
+- URI:
+  - code file: `file://{project}/{relative_path}` (от корня репо)
+  - module: `module://{project}/{module_name}`
+  - symbol: `symbol://{project}/{module_name}#{symbol_name}`
+  - doc: `doc://{project}/{doc_name}`
+  - doc section: `docsection://{project}/{doc_name}#{section_id}`
+- `dp_edge` (канонические поля `edge_kind`, `from_uri`, `to_uri`), допустимые `edge_kind` на этапе ТЗ-2:
+  - `DEFINED_IN`: symbol -> file|module
+  - `USES`: symbol -> symbol
+  - `DESCRIBED_IN`: module|symbol -> docsection
+  - `REFERENCES`: docsection -> symbol|module|docsection
+Все сущности и рёбра должны иметь валидные URI и project.
+
 ## Примечания
 - Размерность эмбеддингов — 1024 для кода и документов (`text-embedding-3-large/small`).
 - Векторный поиск использует HNSW (`SET hnsw.ef_search=40` задаётся в `PgClient`).
-- `graph.subgraph` возвращает компактный набор `{type,target,source}`; при сбое Neo4j возвращается пустой подграф, и MCP переключается в `status="down"`.
+- `graph.subgraph` возвращает компактный набор `{type,target,source}`; при сбое Neo4j возвращается пустой подграф и `status="down"`.
 - Логи планов пишутся в `logs/context-engine.log` (JSONL).
 - План по разработке локального UI и backend FastAPI лежит в `docs/CONTEXT_ENGINE_UI_PLAN.md`.
-- Если Postgres/Neo4j временно недоступны, `get_context` не падает: включается локальный fallback, который сканирует рабочее дерево и возвращает минимальный набор сниппетов с пометкой `fallback` в explain-пейлоуде. Это позволяет экономить время и контекст при деградации инфраструктуры.
+- Если Postgres/Neo4j недоступны, `get_context` возвращает `status="down"` с деталями компонента (тихие фолбеки отключены).
 - Health‑эндпоинты кешируют метрики на 30 секунд и дополнительно резюмируют последние фоновые задачи (статусы/последний job).
+- `max_tokens_share` в policy сейчас задаёт долю токен‑бюджета на модуль. Для более тонкого распределения по тегам/скоупам потребуется расширить модель policy и учёт тегов при отборе чанков.
 
 ## UI/Backend (FastAPI + React)
 1. JS-зависимости: `cd ui && npm install`.
@@ -116,9 +128,6 @@ MCP‑совместимый сервер, который по тексту за
   - Quick Tools — `get_context` показывает `plan_id` и ссылку «Открыть в Explain»
 - Background Jobs параметры заданы (рекомендуется): `MCP_BG_JOB_TIMEOUT=900`, `MCP_BG_MAX_JOBS=8`
 - Explain Viewer теперь поддерживает мгновенный `get_context` rerun с историей параметров, Live Plans стримит через SSE, Graph Preview умеет экспортировать PNG/SVG, Quick Tools отображают идентификаторы созданных планов/джобов, а страница Jobs показывает логи и статус фоновых процессов.
-
-## Автозапуск MCP сервера
-Скрипт `scripts/start_context_engine_mcp.ps1` проверяет, запущен ли `python mcp/server.py`, и при необходимости стартует его в фоне. Добавьте ярлык на этот скрипт в `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup` (указав `-ProjectRoot "D:\project\context_engine"`), чтобы MCP поднимался автоматически при входе в систему.
 
 ## Роли read-only для UI
 ```sql

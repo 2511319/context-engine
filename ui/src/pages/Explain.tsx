@@ -117,6 +117,30 @@ const artifactsToCsv = (artifacts: Artifact[], kind: "code" | "doc"): string => 
     .join("\n");
 };
 
+function MiniList({ title, items }: { title: string; items: Array<Record<string, any>> }): JSX.Element {
+  const entries = items.slice(0, 5);
+  if (!entries.length) {
+    return <Typography variant="body2" color="text.secondary">—</Typography>;
+  }
+  return (
+    <Stack spacing={0.5}>
+      <Typography variant="subtitle2">{title}</Typography>
+      {entries.map((item, idx) => (
+        <Typography key={`${title}-${idx}`} variant="body2" color="text.secondary">
+          {Object.entries(item)
+            .map(([k, v]) => `${k}: ${v}`)
+            .join(" • ")}
+        </Typography>
+      ))}
+      {items.length > 5 && (
+        <Typography variant="caption" color="text.secondary">
+          показаны первые 5 из {items.length}
+        </Typography>
+      )}
+    </Stack>
+  );
+}
+
 function ArtifactList({ title, items }: { title: string; items: Artifact[] }): JSX.Element {
   const maxScore = useMemo(() => Math.max(...items.map((a) => a.score ?? 0), 1), [items]);
 
@@ -175,6 +199,7 @@ function ExplainPage(): JSX.Element {
   const { project } = useProject();
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
+  const [listState, setListState] = useState({ offset: 0, limit: 40 });
   const [formState, setFormState] = useState({
     maxCode: 8,
     maxDoc: 5,
@@ -200,13 +225,18 @@ function ExplainPage(): JSX.Element {
   >([]);
 
   const {
-    data: plans = [],
+    data: plansData,
     isLoading: plansLoading,
     error: plansError
-  } = useQuery<PlanListItem[]>({
-    queryKey: ["plan-list", project],
-    queryFn: async () => await apiGet<PlanListItem[]>(`/plans?limit=40&project=${encodeURIComponent(project)}`)
+  } = useQuery<{ plans: PlanListItem[]; total?: number }>({
+    queryKey: ["plan-list", project, listState.offset, listState.limit],
+    queryFn: async () =>
+      apiGet<{ plans: PlanListItem[]; total?: number }>(
+        `/api/admin/plans?limit=${listState.limit}&offset=${listState.offset}&project=${encodeURIComponent(project)}`
+      ),
   });
+  const plans = plansData?.plans ?? [];
+  const plansTotal = plansData?.total ?? plans.length;
 
   useEffect(() => {
     const qp = searchParams.get("plan");
@@ -235,7 +265,7 @@ function ExplainPage(): JSX.Element {
     error: detailError
   } = useQuery<PlanDetail>({
     queryKey: ["plan-detail", project, selectedPlan],
-    queryFn: async () => await apiGet<PlanDetail>(`/plans/${selectedPlan}`),
+    queryFn: async () => await apiGet<PlanDetail>(`/api/admin/plans/${selectedPlan}`),
     enabled: Boolean(selectedPlan)
   });
 
@@ -247,6 +277,9 @@ function ExplainPage(): JSX.Element {
   const resultSizes = planDetail?.result_sizes ?? {};
   const params = planDetail?.params || explain?.params || {};
   const rerunTask = params?.task as string | undefined;
+  const dataRoute = explain?.data_route ?? {};
+  const policyRoute = explain?.policy_route ?? {};
+  const selection = explain?.selection ?? {};
 
   const derivedFormDefaults = useMemo(
     () => ({
@@ -412,6 +445,25 @@ function ExplainPage(): JSX.Element {
             <Typography variant="h6" gutterBottom>
               Plans
             </Typography>
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+              <Button
+                size="small"
+                disabled={listState.offset === 0}
+                onClick={() => setListState((prev) => ({ ...prev, offset: Math.max(0, prev.offset - prev.limit) }))}
+              >
+                Prev
+              </Button>
+              <Button
+                size="small"
+                disabled={listState.offset + plans.length >= plansTotal}
+                onClick={() => setListState((prev) => ({ ...prev, offset: prev.offset + prev.limit }))}
+              >
+                Next
+              </Button>
+              <Typography variant="caption" color="text.secondary">
+                {listState.offset + 1}–{listState.offset + plans.length} из {plansTotal}
+              </Typography>
+            </Stack>
             {plansLoading && <CircularProgress size={24} />}
             {plansError && <Alert severity="error">{(plansError as Error).message}</Alert>}
             <List dense>
@@ -532,6 +584,42 @@ function ExplainPage(): JSX.Element {
                     </Grid>
                   </Grid>
                 )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  Explain (data/policy)
+                </Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} md={4}>
+                    <Typography variant="subtitle2">Data route</Typography>
+                    <MiniList title="code_candidates" items={dataRoute?.code_candidates_top ?? []} />
+                    <MiniList title="doc_candidates" items={dataRoute?.doc_candidates_top ?? []} />
+                    <MiniList title="modules_base" items={dataRoute?.modules_base ?? []} />
+                  </Grid>
+                  <Grid item xs={12} md={4}>
+                    <Typography variant="subtitle2">Policy route</Typography>
+                    <MiniList
+                      title="matched rules"
+                      items={(policyRoute?.routing_rules_matched as Array<Record<string, any>> | undefined) ?? []}
+                    />
+                    <MiniList
+                      title="feedback effects"
+                      items={(policyRoute?.feedback_effects as Array<Record<string, any>> | undefined) ?? []}
+                    />
+                    <MiniList
+                      title="sensitive filtered"
+                      items={((policyRoute?.sensitive_filtered as string[] | undefined) ?? []).map((uri) => ({ uri }))}
+                    />
+                  </Grid>
+                  <Grid item xs={12} md={4}>
+                    <Typography variant="subtitle2">Selection</Typography>
+                    <MiniList title="final modules" items={selection?.final_modules ?? []} />
+                    <MiniList title="included chunks" items={selection?.included_chunks ?? []} />
+                  </Grid>
+                </Grid>
               </CardContent>
             </Card>
 

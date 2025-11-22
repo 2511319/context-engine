@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from .adapters import mcp
 from .deps import get_settings
 from .routers import config as config_router
-from .routers import graph, health, jobs as jobs_router, plans, root, schema, tools
+from .routers import admin, graph, health, jobs as jobs_router, plans, root, schema, tools
 
 
 @asynccontextmanager
@@ -33,6 +33,7 @@ app.add_middleware(
 )
 
 app.include_router(root.router)
+app.include_router(admin.router)
 app.include_router(plans.router)
 app.include_router(graph.router)
 app.include_router(health.router)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Dict, Iterable, Tuple
 
-from .pg import PgClient
+from core.dal.repos.feedback_repo import FeedbackRepo
 
 HALF_LIFE_DAYS = 14.0
 MAX_ABS = 0.25
@@ -20,12 +20,12 @@ def _decay_factor(created_at_iso: str, now: dt.datetime) -> float:
     return 0.5 ** (age_days / HALF_LIFE_DAYS)
 
 
-def biases_for_uris(pg: PgClient, project: str, task_fp: str, uris: Iterable[str], now: dt.datetime | None = None) -> Dict[str, Tuple[float, float]]:
+def biases_for_uris(feedback_repo: FeedbackRepo, project: str, task_fp: str, uris: Iterable[str], now: dt.datetime | None = None) -> Dict[str, Tuple[float, float]]:
     """
     Вернуть словарь uri -> (bias_pin, penalty_neg) с экспоненциальным декеем и ограничением |bias|<=0.25.
     """
     now = now or dt.datetime.now(dt.timezone.utc)
-    rows = pg.recent_feedback_for(project, task_fp, list(uris))
+    rows = feedback_repo.recent_feedback_for(project, task_fp, list(uris))
     pos: Dict[str, float] = {}
     neg: Dict[str, float] = {}
     for uri, label, created_at in rows:

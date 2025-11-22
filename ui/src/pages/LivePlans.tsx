@@ -1,14 +1,7 @@
-import { useEffect, useState } from "react";
-import {
-  Alert,
-  Box,
-  Card,
-  CardContent,
-  Chip,
-  CircularProgress,
-  Typography
-} from "@mui/material";
-import { API_BASE } from "../api/client";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Stack, Typography } from "@mui/material";
+import { apiGet } from "../api/client";
 import { useProject } from "../context/ProjectContext";
 
 type PlanItem = {
@@ -25,65 +18,55 @@ type PlanItem = {
 
 function LivePlansPage(): JSX.Element {
   const { project } = useProject();
-  const [plans, setPlans] = useState<PlanItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [offset, setOffset] = useState(0);
+  const limit = 20;
+  const { data, isLoading, error, isRefetching, refetch } = useQuery({
+    queryKey: ["admin-plans-live", project, offset, limit],
+    queryFn: () =>
+      apiGet<{ plans: PlanItem[]; limit: number; offset: number; total: number }>(
+        `/api/admin/plans?limit=${limit}&offset=${offset}&project=${encodeURIComponent(project)}`
+      ),
+    refetchInterval: 5000,
+  });
 
-  useEffect(() => {
-    let eventSource: EventSource | null = null;
-    let retryHandle: ReturnType<typeof setTimeout> | null = null;
-    setPlans([]);
-    setLoading(true);
-    const fetchInitial = async (): Promise<void> => {
-      try {
-        const resp = await fetch(
-          `${API_BASE}/plans?limit=10&project=${encodeURIComponent(project)}`
-        );
-        if (!resp.ok) throw new Error("Failed to load plans");
-        const data = (await resp.json()) as PlanItem[];
-        setPlans(data);
-      } catch (err) {
-        setError((err as Error).message);
-      } finally {
-        setLoading(false);
-      }
-    };
+  const plans = useMemo(() => data?.plans ?? [], [data?.plans]);
+  const total = data?.total ?? plans.length;
+  const hasPrev = offset > 0;
+  const hasNext = offset + plans.length < total;
 
-    const subscribe = (): void => {
-      const streamUrl = new URL(`${API_BASE}/plans/stream`);
-      streamUrl.searchParams.set("project", project);
-      eventSource = new EventSource(streamUrl.toString());
-      eventSource.addEventListener("plan", (event) => {
-        const payload = JSON.parse((event as MessageEvent).data) as PlanItem;
-        setPlans((prev) => {
-          const filtered = prev.filter((p) => p.plan_id !== payload.plan_id);
-          return [payload, ...filtered].slice(0, 20);
-        });
-      });
-      eventSource.onerror = () => {
-        setError("Lost connection to live stream");
-        eventSource?.close();
-        retryHandle = window.setTimeout(subscribe, 3000);
-      };
-    };
-
-    void fetchInitial();
-    subscribe();
-
-    return () => {
-      eventSource?.close();
-      if (retryHandle) {
-        clearTimeout(retryHandle);
-      }
-    };
-  }, [project]);
-
-  if (loading) return <CircularProgress />;
-  if (error) return <Alert severity="error">{error}</Alert>;
+  if (isLoading) return <CircularProgress />;
+  if (error) return <Alert severity="error">{(error as Error).message}</Alert>;
 
   return (
     <Box display="flex" flexDirection="column" gap={2}>
-      <Typography variant="h4">Live Plans</Typography>
+      <Stack direction="row" spacing={2} alignItems="center">
+        <Typography variant="h4">Live Plans</Typography>
+        <Button
+          size="small"
+          variant="outlined"
+          onClick={() => refetch()}
+          disabled={isRefetching}
+        >
+          {isRefetching ? "Refreshing..." : "Refresh"}
+        </Button>
+        <Button
+          size="small"
+          disabled={!hasPrev}
+          onClick={() => setOffset(Math.max(0, offset - limit))}
+        >
+          Prev
+        </Button>
+        <Button
+          size="small"
+          disabled={!hasNext}
+          onClick={() => setOffset(offset + limit)}
+        >
+          Next
+        </Button>
+        <Typography variant="body2" color="text.secondary">
+          {offset + 1}–{offset + plans.length} из {total}
+        </Typography>
+      </Stack>
       {plans.map((plan) => (
         <Card key={plan.plan_id}>
           <CardContent>

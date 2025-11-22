@@ -4,8 +4,13 @@ import logging
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
+from core.dal.repos.code_repo import CodeRepo
+from core.dal.repos.doc_repo import DocRepo
+from core.dal.repos.feedback_repo import FeedbackRepo
+from core.dal.types import ChunkRow
+from core.uri import docsection_uri, file_uri
+
 from .openai_embed import embed_batch
-from .pg import PgClient, PgRow
 from .feedback import biases_for_uris
 
 logger = logging.getLogger(__name__)
@@ -26,6 +31,7 @@ class RetrievalCandidates:
 @dataclass
 class Candidate:
     kind: str  # code | doc
+    project: str
     path: Optional[str] = None
     doc_name: Optional[str] = None
     section: Optional[str] = None
@@ -41,12 +47,13 @@ class Candidate:
     bm25_rank_pos: int = 10**9
     bias_pin: float = 0.0
     penalty_neg: float = 0.0
+    module: Optional[str] = None
 
     def uri(self) -> str:
         if self.kind == "code" and self.path:
-            return f"file://{self.path}"
+            return file_uri(self.project, self.path)
         if self.kind == "doc" and self.doc_name and self.section:
-            return f"doc://{self.doc_name}#{self.section}"
+            return docsection_uri(self.project, self.doc_name, self.section)
         return ""
 
 
@@ -73,7 +80,9 @@ def normalize_min_max(values: List[float]) -> List[float]:
 
 
 def hybrid_search(
-    pg: PgClient,
+    code_repo: CodeRepo,
+    doc_repo: DocRepo,
+    feedback_repo: FeedbackRepo,
     project: str,
     task: str,
     api_key: Optional[str],
@@ -82,6 +91,7 @@ def hybrid_search(
     lex_cfg: str = "simple",
     emb_models: Tuple[str, int, str, int] = ("text-embedding-3-large", 1024, "text-embedding-3-small", 1024),
     task_fp: Optional[str] = None,
+    apply_feedback: bool = True,
 ) -> Tuple[List[Candidate], List[Candidate]]:
     """
     Вернуть списки кандидатов (code, doc) с финальным score и отсортированные детерминированно.
@@ -97,18 +107,22 @@ def hybrid_search(
         code_vec, doc_vec = vecs[0], vecs[1]
 
     # Fetch candidates
-    v_code: List[PgRow] = pg.topk_vector_code(code_vec, project, candidates.vector_k)
-    v_doc: List[PgRow] = pg.topk_vector_docs(doc_vec, project, candidates.vector_k)
-    l_code: List[PgRow] = pg.topk_lex_code(task, project, candidates.bm25_k, lex_cfg)
-    l_doc: List[PgRow] = pg.topk_lex_docs(task, project, candidates.bm25_k, lex_cfg)
+    v_code: List[ChunkRow] = code_repo.topk_vector(project, code_vec, candidates.vector_k)
+    v_doc: List[ChunkRow] = doc_repo.topk_vector(project, doc_vec, candidates.vector_k)
+    l_code: List[ChunkRow] = code_repo.topk_lex(project, task, candidates.bm25_k, lex_cfg)
+    l_doc: List[ChunkRow] = doc_repo.topk_lex(project, task, candidates.bm25_k, lex_cfg)
 
     # Build union for normalization across both sources
     unions: List[Tuple[str, Optional[float], Optional[float]]] = []
     # store indexes for rank positions (for tie-break)
     bm25_positions: Dict[str, int] = {}
 
-    def key_of_row(kind: str, r: PgRow) -> str:
-        return f"file://{r.path}" if kind == "code" and r.path else f"doc://{r.doc_name}#{r.section}"
+    def key_of_row(kind: str, r: ChunkRow) -> str:
+        if kind == "code" and r.path:
+            return file_uri(project, r.path)
+        if kind == "doc" and r.doc_name and r.section:
+            return docsection_uri(project, r.doc_name, r.section)
+        return ""
 
     for r in v_code:
         unions.append((key_of_row("code", r), 1.0 - (r.dist or 0.0), None))
@@ -137,12 +151,13 @@ def hybrid_search(
 
     # Prepare candidate objects merging signals
     merged: Dict[str, Candidate] = {}
-    def attach(kind: str, r: PgRow) -> None:
+    def attach(kind: str, r: ChunkRow) -> None:
         k = key_of_row(kind, r)
         c = merged.get(k)
         if c is None:
             c = Candidate(
                 kind=kind,
+                project=project,
                 path=r.path if kind == "code" else None,
                 doc_name=r.doc_name if kind == "doc" else None,
                 section=r.section if kind == "doc" else None,
@@ -152,6 +167,7 @@ def hybrid_search(
                 fp_sha256=r.fp_sha256,
                 dist=r.dist,
                 rank=r.rank,
+                module=r.module if kind == "code" else None,
             )
             merged[k] = c
         if r.dist is not None:
@@ -171,8 +187,8 @@ def hybrid_search(
 
     # Bias from feedback
     bias: Dict[str, Tuple[float, float]] = {}
-    if task_fp:
-        bias = biases_for_uris(pg, project, task_fp, merged.keys())
+    if apply_feedback and task_fp:
+        bias = biases_for_uris(feedback_repo, project, task_fp, merged.keys())
 
     # Final score and sort
     for u, c in merged.items():

@@ -8,10 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-try:
-    import psycopg
-except Exception:  # pragma: no cover
-    psycopg = None  # type: ignore
+from core.dal import PgClient
 
 
 logger = logging.getLogger(__name__)
@@ -41,9 +38,15 @@ def new_plan_id() -> str:
 class PlanLogger:
     """Persists plan executions to Postgres and optional JSONL log."""
 
-    def __init__(self, pg_dsn: Optional[str], jsonl_path: Optional[Path] = None) -> None:
+    def __init__(
+        self,
+        pg_dsn: Optional[str] = None,
+        jsonl_path: Optional[Path] = None,
+        pg_client: Optional[PgClient] = None,
+    ) -> None:
         self.pg_dsn = pg_dsn
         self.jsonl_path = jsonl_path
+        self.pg_client = pg_client or (PgClient(pg_dsn) if pg_dsn else None)
 
     def log(self, entry: PlanLogEntry) -> None:
         """Write the entry to Postgres (if configured) and JSONL (best effort)."""
@@ -52,10 +55,10 @@ class PlanLogger:
             self._write_jsonl(self.jsonl_path, entry)
 
     def _write_pg(self, entry: PlanLogEntry) -> None:
-        if not self.pg_dsn or psycopg is None:
+        if not self.pg_client:
             return
         try:
-            with psycopg.connect(self.pg_dsn, autocommit=True) as conn:
+            with self.pg_client.connect() as conn:
                 with conn.cursor() as cur:
                     token_budget_json = (
                         json.dumps(entry.token_budget, ensure_ascii=False)

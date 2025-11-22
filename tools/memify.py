@@ -1,60 +1,44 @@
 from __future__ import annotations
 
+import argparse
 import logging
 import os
 
-try:
-    import psycopg
-except Exception as exc:  # pragma: no cover
-    psycopg = None  # type: ignore
+from core.dal import PgClient
+from core.dal.repos import IngestRepo
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("context_engine.tools.memify")
 
 
 def main() -> None:
-    if psycopg is None:
-        raise RuntimeError("psycopg (psycopg3) is required")
+    parser = argparse.ArgumentParser(description="Post-process indexed chunks for a single project")
+    parser.add_argument("--project", required=True, help="Project id for scoping updates")
+    args = parser.parse_args()
+
     pg_dsn = os.getenv("PG_DSN")
     if not pg_dsn:
         raise RuntimeError("PG_DSN is not set")
+    pg = PgClient(pg_dsn)
+    ingest = IngestRepo(pg)
 
-    with psycopg.connect(pg_dsn, autocommit=True) as conn:
-        with conn.cursor() as cur:
-            # Lexical vectors
-            logger.info("Updating lexical tsvectors...")
-            try:
-                cur.execute("UPDATE code_chunks SET lex = to_tsvector('simple', content) WHERE lex IS NULL;")
-                cur.execute("UPDATE doc_chunks SET lex = to_tsvector('simple', content) WHERE lex IS NULL;")
-            except Exception as exc:
-                logger.error("Failed to update lex: %s", exc)
+    with ingest.cursor() as cur:
+        logger.info("Updating lexical tsvectors for project=%s...", args.project)
+        try:
+            ingest.update_lex(args.project, cur=cur)
+        except Exception as exc:
+            logger.error("Failed to update lex: %s", exc)
 
-            # Remove exact duplicates by fp within project
-            logger.info("Removing duplicate chunks (exact fp match)...")
-            try:
-                cur.execute(
-                    """
-                    DELETE FROM code_chunks a USING code_chunks b
-                    WHERE a.id < b.id
-                      AND a.project = b.project
-                      AND a.fp_sha256 = b.fp_sha256;
-                    """
-                )
-                cur.execute(
-                    """
-                    DELETE FROM doc_chunks a USING doc_chunks b
-                    WHERE a.id < b.id
-                      AND a.project = b.project
-                      AND a.fp_sha256 = b.fp_sha256;
-                    """
-                )
-            except Exception as exc:
-                logger.error("Failed to deduplicate: %s", exc)
+        logger.info("Removing duplicate chunks (exact fp match) for project=%s...", args.project)
+        try:
+            ingest.deduplicate_chunks(args.project, cur=cur)
+        except Exception as exc:
+            logger.error("Failed to deduplicate: %s", exc)
 
-            try:
-                cur.execute("ANALYZE code_chunks; ANALYZE doc_chunks;")
-            except Exception as exc:
-                logger.warning("ANALYZE failed: %s", exc)
+        try:
+            ingest.analyze_chunks(cur=cur)
+        except Exception as exc:
+            logger.warning("ANALYZE failed: %s", exc)
 
     logger.info("memify completed")
 

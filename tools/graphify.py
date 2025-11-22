@@ -5,23 +5,11 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
-try:
-    import yaml
-except Exception as exc:  # pragma: no cover
-    yaml = None  # type: ignore
-
-try:
-    import psycopg
-except Exception as exc:  # pragma: no cover
-    psycopg = None  # type: ignore
-
-try:
-    from neo4j import GraphDatabase  # type: ignore
-except Exception as exc:  # pragma: no cover
-    GraphDatabase = None  # type: ignore
-
+from core.dal import GraphClient, PgClient
+from core.dal.repos import IngestRepo
+from core.uri import doc_uri, docsection_uri, file_uri, module_uri, symbol_uri
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("context_engine.tools.graphify")
@@ -35,157 +23,152 @@ class Env:
     neo4j_pass: str
 
 
-def load_engine_cfg(path: Path) -> Dict[str, Any]:
-    if yaml is None:
-        raise RuntimeError("PyYAML is required")
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        raise ValueError("engine.yml must be a mapping")
-    return data
-
-
-def ensure_constraints(driver) -> None:
+def ensure_constraints(graph: GraphClient) -> None:
     cql = [
-        "CREATE CONSTRAINT module_unique IF NOT EXISTS FOR (m:Module) REQUIRE (m.project, m.name) IS UNIQUE",
-        "CREATE CONSTRAINT contract_unique IF NOT EXISTS FOR (c:Contract) REQUIRE (c.project, c.name) IS UNIQUE",
-        "CREATE CONSTRAINT docsection_unique IF NOT EXISTS FOR (d:DocSection) REQUIRE (d.project, d.doc_name, d.name) IS UNIQUE",
-        "CREATE INDEX tool_name_index IF NOT EXISTS FOR (t:Tool) ON (t.name)",
+        "CREATE CONSTRAINT file_unique IF NOT EXISTS FOR (f:File) REQUIRE (f.project, f.uri) IS UNIQUE",
+        "CREATE CONSTRAINT module_unique IF NOT EXISTS FOR (m:Module) REQUIRE (m.project, m.uri) IS UNIQUE",
+        "CREATE CONSTRAINT symbol_unique IF NOT EXISTS FOR (s:Symbol) REQUIRE (s.project, s.uri) IS UNIQUE",
+        "CREATE CONSTRAINT doc_unique IF NOT EXISTS FOR (d:Doc) REQUIRE (d.project, d.uri) IS UNIQUE",
+        "CREATE CONSTRAINT docsection_unique IF NOT EXISTS FOR (ds:DocSection) REQUIRE (ds.project, ds.uri) IS UNIQUE",
     ]
-    with driver.session() as s:
+    with graph.session() as s:
         for stmt in cql:
             s.run(stmt)
 
 
-def project_from_cfg(cfg: Dict[str, Any]) -> str:
-    return str(cfg.get("project", "context_engine"))
+def normalize_code_row(project: str, row: Sequence[Any]) -> Tuple[str, str, str]:
+    uri, path, module = row
+    path = str(path)
+    uri = uri or file_uri(project, path)
+    module_name = module or path
+    return uri, path, module_name
 
 
-def project_rules(cfg: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
-    rules = cfg.get("routing", {}).get("rules", [])
-    return rules if isinstance(rules, list) else []
+def normalize_doc_row(project: str, row: Sequence[Any]) -> Tuple[str, str, str, str]:
+    uri, doc_name, section = row
+    doc_name = doc_name or "doc"
+    section = section or "sec-1-1"
+    section_uri = uri or docsection_uri(project, doc_name, section)
+    base_uri = doc_uri(project, doc_name)
+    return base_uri, section_uri, doc_name, section
 
 
-def merge_module_and_docs(driver, project: str, rules: Iterable[Dict[str, Any]], dry_run: bool) -> Tuple[int, int, int]:
-    mod_n = 0
-    doc_n = 0
-    rel_n = 0
-    with driver.session() as s:
-        for rule in rules:
-            module = rule.get("module")
-            if not module:
-                continue
-            if dry_run:
-                mod_n += 1
-            else:
-                s.run("MERGE (m:Module {project:$p, name:$n, path:$n})", p=project, n=module)
-                mod_n += 1
-            for doc in rule.get("docs", []) or []:
-                if dry_run:
-                    doc_n += 1
-                    rel_n += 1
-                    continue
-                s.run("MERGE (d:DocSection {project:$p, doc_name:$doc, name:$name})",
-                      p=project, doc=doc, name=doc)
-                s.run(
-                    "MATCH (m:Module {project:$p, name:$n}), (d:DocSection {project:$p, doc_name:$doc, name:$name}) "
-                    "MERGE (m)-[:DESCRIBED_IN]->(d)",
-                    p=project, n=module, doc=doc, name=doc,
-                )
-                doc_n += 1
-                rel_n += 1
-    return mod_n, doc_n, rel_n
+def build_symbol_uri(project: str, name: str, module: str | None, path: str | None, uri: str | None) -> str:
+    if uri:
+        return uri
+    mod = module or (path or "").replace(".py", "")
+    return symbol_uri(project, mod, name)
 
 
-def project_dp_edges(conn, project: str) -> List[Tuple[str, str, str]]:
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT rel, src_uri, dst_uri FROM dp_edge WHERE project=%s",
-            (project,),
-        )
-        return [(r, s, d) for (r, s, d) in cur.fetchall()]
+def dry_run_summary(project: str, code_rows, doc_rows, symbols, edges) -> Dict[str, Any]:
+    return {
+        "project": project,
+        "nodes": {
+            "files": len(code_rows),
+            "doc_sections": len(doc_rows),
+            "symbols": len(symbols),
+        },
+        "edges": len(edges),
+    }
 
 
-def parse_uri(uri: str) -> Tuple[str, Dict[str, str]]:
-    # file://path -> type=file, props {path}
-    # doc://DocName#Section -> type=doc, props {doc_name, name}
-    if uri.startswith("file://"):
-        return "file", {"path": uri[len("file://"):].lstrip("/")}
-    if uri.startswith("doc://"):
-        rest = uri[len("doc://"):]
-        if "#" in rest:
-            doc_name, name = rest.split("#", 1)
-        else:
-            doc_name, name = rest, rest
-        return "doc", {"doc_name": doc_name, "name": name}
-    return "unknown", {"raw": uri}
-
-
-def merge_edges(driver, project: str, edges: Iterable[Tuple[str, str, str]], dry_run: bool) -> int:
-    count = 0
-    with driver.session() as s:
-        for rel, src, dst in edges:
-            src_t, src_p = parse_uri(src)
-            dst_t, dst_p = parse_uri(dst)
-            if src_t == "file":
-                if not dry_run:
-                    s.run("MERGE (m:Module {project:$p, name:$n, path:$n})", p=project, n=src_p["path"])
-                src_match = "(m:Module {project:$p, name:$src})"
-            elif src_t == "doc":
-                if not dry_run:
-                    s.run("MERGE (d:DocSection {project:$p, doc_name:$doc, name:$name})", p=project, doc=src_p["doc_name"], name=src_p["name"])
-                src_match = "(d:DocSection {project:$p, doc_name:$doc_src, name:$name_src})"
-            else:
-                continue
-
-            if dst_t == "file":
-                if not dry_run:
-                    s.run("MERGE (m2:Module {project:$p, name:$n, path:$n})", p=project, n=dst_p["path"])
-                dst_match = "(m2:Module {project:$p, name:$dst})"
-            elif dst_t == "doc":
-                if not dry_run:
-                    s.run("MERGE (d2:DocSection {project:$p, doc_name:$doc, name:$name})", p=project, doc=dst_p["doc_name"], name=dst_p["name"])
-                dst_match = "(d2:DocSection {project:$p, doc_name:$doc_dst, name:$name_dst})"
-            else:
-                continue
-
-            if dry_run:
-                count += 1
-                continue
-
-            if rel not in {"DESCRIBED_IN", "IMPLEMENTS", "REFERENCES"}:
-                continue
-
+def apply_graph(graph: GraphClient, project: str, code_rows, doc_rows, symbols, edges) -> Dict[str, int]:
+    created = {"nodes": 0, "edges": 0}
+    with graph.session() as s:
+        for row in code_rows:
+            uri, path, module_name = normalize_code_row(project, row)
+            mod_uri = module_uri(project, module_name)
+            s.run("MERGE (f:File {project:$p, uri:$u}) SET f.path=$path", p=project, u=uri, path=path)
+            s.run("MERGE (m:Module {project:$p, uri:$u}) SET m.name=$name", p=project, u=mod_uri, name=module_name)
             s.run(
-                f"MATCH {src_match}, {dst_match} MERGE "+
-                (" (m)-[:DESCRIBED_IN]->(d2)" if rel == "DESCRIBED_IN" else
-                 " (m)-[:IMPLEMENTS]->(m2)" if rel == "IMPLEMENTS" else
-                 " (m)-[:REFERENCES]->(m2)"),
+                "MATCH (f:File {project:$p, uri:$fu}), (m:Module {project:$p, uri:$mu}) "
+                "MERGE (f)-[:PART_OF_MODULE]->(m)",
                 p=project,
-                src=src_p.get("path"),
-                dst=dst_p.get("path"),
-                doc_src=src_p.get("doc_name"),
-                name_src=src_p.get("name"),
-                doc_dst=dst_p.get("doc_name"),
-                name_dst=dst_p.get("name"),
+                fu=uri,
+                mu=mod_uri,
             )
-            count += 1
-    return count
+            created["nodes"] += 1
+
+        for row in doc_rows:
+            base_uri, section_uri, doc_name, section = normalize_doc_row(project, row)
+            s.run("MERGE (d:Doc {project:$p, uri:$u}) SET d.name=$name", p=project, u=base_uri, name=doc_name)
+            s.run(
+                "MERGE (ds:DocSection {project:$p, uri:$u}) SET ds.doc_name=$doc, ds.section_id=$sec",
+                p=project,
+                u=section_uri,
+                doc=doc_name,
+                sec=section,
+            )
+            s.run(
+                "MATCH (d:Doc {project:$p, uri:$du}), (ds:DocSection {project:$p, uri:$su}) "
+                "MERGE (d)-[:HAS_SECTION]->(ds)",
+                p=project,
+                du=base_uri,
+                su=section_uri,
+            )
+            created["nodes"] += 1
+
+        for uri, name, module, path, kind in symbols:
+            sym_uri = build_symbol_uri(project, name, module, path, uri)
+            s.run(
+                "MERGE (sym:Symbol {project:$p, uri:$u}) "
+                "SET sym.name=$name, sym.module=$module, sym.path=$path, sym.kind=$kind",
+                p=project,
+                u=sym_uri,
+                name=name,
+                module=module,
+                path=path,
+                kind=kind,
+            )
+            created["nodes"] += 1
+
+        for edge_kind, from_uri, to_uri in edges:
+            if not from_uri or not to_uri:
+                continue
+            if edge_kind == "DEFINED_IN":
+                s.run(
+                    "MATCH (a:Symbol {project:$p, uri:$fu}), (b {project:$p, uri:$tu}) "
+                    "MERGE (a)-[:DEFINED_IN]->(b)",
+                    p=project,
+                    fu=from_uri,
+                    tu=to_uri,
+                )
+                created["edges"] += 1
+            elif edge_kind == "USES":
+                s.run(
+                    "MATCH (a:Symbol {project:$p, uri:$fu}), (b:Symbol {project:$p, uri:$tu}) "
+                    "MERGE (a)-[:USES]->(b)",
+                    p=project,
+                    fu=from_uri,
+                    tu=to_uri,
+                )
+                created["edges"] += 1
+            elif edge_kind == "DESCRIBED_IN":
+                s.run(
+                    "MATCH (a {project:$p, uri:$fu}), (b:DocSection {project:$p, uri:$tu}) "
+                    "MERGE (a)-[:DESCRIBED_IN]->(b)",
+                    p=project,
+                    fu=from_uri,
+                    tu=to_uri,
+                )
+                created["edges"] += 1
+            elif edge_kind == "REFERENCES":
+                s.run(
+                    "MATCH (a:DocSection {project:$p, uri:$fu}), (b {project:$p, uri:$tu}) "
+                    "MERGE (a)-[:REFERENCES]->(b)",
+                    p=project,
+                    fu=from_uri,
+                    tu=to_uri,
+                )
+                created["edges"] += 1
+    return created
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Project stable graph projection into Neo4j")
+    parser = argparse.ArgumentParser(description="Data-driven graph projection into Neo4j (uses PG URIs)")
     parser.add_argument("--project", required=True)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-
-    repo = Path(__file__).resolve().parents[1]
-    cfg = load_engine_cfg(repo / "config" / "engine.yml")
-    project = args.project or project_from_cfg(cfg)
-
-    if GraphDatabase is None:
-        raise RuntimeError("neo4j driver is required")
-    if psycopg is None:
-        raise RuntimeError("psycopg (psycopg3) is required")
 
     env = Env(
         pg_dsn=os.getenv("PG_DSN", ""),
@@ -199,16 +182,24 @@ def main() -> None:
     if not (env.neo4j_uri and env.neo4j_user and env.neo4j_pass):
         raise RuntimeError("NEO4J credentials are not set")
 
-    driver = GraphDatabase.driver(env.neo4j_uri, auth=(env.neo4j_user, env.neo4j_pass))
-    ensure_constraints(driver)
+    graph_client = GraphClient(env.neo4j_uri, env.neo4j_user, env.neo4j_pass)
+    ensure_constraints(graph_client)
 
-    with psycopg.connect(env.pg_dsn, autocommit=True) as conn:
-        rules = list(project_rules(cfg))
-        mod_n, doc_n, rel_n = merge_module_and_docs(driver, project, rules, args.dry_run)
-        edges = project_dp_edges(conn, project)
-        edge_n = merge_edges(driver, project, edges, args.dry_run)
+    pg = PgClient(env.pg_dsn)
+    ingest = IngestRepo(pg)
+    code_rows = ingest.fetch_code_nodes(args.project)
+    doc_rows = ingest.fetch_doc_nodes(args.project)
+    symbols = ingest.fetch_symbols(args.project)
+    edges = ingest.fetch_edges(args.project)
 
-    logger.info("graphify: modules=%d docs=%d described_in=%d dp_edges=%d (dry_run=%s)", mod_n, doc_n, rel_n, edge_n, args.dry_run)
+    if args.dry_run:
+        summary = dry_run_summary(args.project, code_rows, doc_rows, symbols, edges)
+        logger.info("graphify dry-run summary: %s", summary)
+        print(summary)
+    else:
+        res = apply_graph(graph_client, args.project, code_rows, doc_rows, symbols, edges)
+        logger.info("graphify applied: %s", res)
+        print(res)
 
 
 if __name__ == "__main__":
