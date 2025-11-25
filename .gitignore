@@ -30,6 +30,7 @@ tmp/
 ui/node_modules/
 ui/.vite/
 ui/dist/
+node-v*-win-x64/
 
 # Databases / runtime state
 .pgdata/
