@@ -143,3 +143,10 @@ CREATE USER context_ui_ro SET PASSWORD 'context_ui_ro' CHANGE NOT REQUIRED;
 GRANT ROLE reader TO context_ui_ro;
 ```
 Затем пропишите DSN/учётки в `.env` (переменные `PG_DSN_RO`, `NEO4J_USER_RO`, `NEO4J_PASS_RO`) и при необходимости обновите `api/deps.py`.
+
+## Хаускипинг (что хранить в репозитории)
+- Код, схемы, SQL/Cypher миграции, UI‑источники и документация (`docs/`, `schemas/`, `tools/`, `core/`, `api/`, `ui/`).
+- Не коммитим окружения и артефакты: `node-v*-win-x64/`, `node_modules/`, `.venv/`, `.pgdata/`, `logs/`, кеши тестов/buildов, локальные данных Neo4j/Postgres.
+- Для Node используйте `nvm use 20.17.0` (см. `.nvmrc`) вместо вложения бинарей в репо; при необходимости больших артефактов — только через Git LFS.
+- Индексация: запускайте `python manage.py ingest --project <proj> --prune` (или `tools/index_repo.py --prune`) после изменений кода/доков, чтобы база очищалась от устаревших файлов.
+- Перед пушем проверяйте `git status` и размер файлов (`git ls-tree -r HEAD --long | sort -k4 -n | tail`) — не должно быть бинарей >50 MB.
