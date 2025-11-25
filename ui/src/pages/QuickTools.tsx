@@ -7,6 +7,7 @@ import {
   CardContent,
   Grid,
   MenuItem,
+  Snackbar,
   Stack,
   TextField,
   Typography
@@ -61,6 +62,11 @@ function QuickToolsPage(): JSX.Element {
   const [results, setResults] = useState<Record<ToolName, ToolResult>>(() => emptyResults());
   const [error, setError] = useState<string | null>(null);
   const [loadingTool, setLoadingTool] = useState<ToolName | null>(null);
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: "success" | "error" }>({
+    open: false,
+    message: "",
+    severity: "success"
+  });
 
   const callTool = async (tool: ToolName, payload: Record<string, unknown>): Promise<void> => {
     setError(null);
@@ -81,9 +87,19 @@ function QuickToolsPage(): JSX.Element {
       }
       const json = (await resp.json()) as ToolResult;
       setResults((prev) => ({ ...prev, [tool]: json }));
+      setSnackbar({
+        open: true,
+        message: `Успех: ${tool} выполнен`,
+        severity: "success"
+      });
     } catch (err) {
       setError((err as Error).message);
       setResults((prev) => ({ ...prev, [tool]: null }));
+      setSnackbar({
+        open: true,
+        message: `Ошибка: ${(err as Error).message}`,
+        severity: "error"
+      });
     } finally {
       setLoadingTool(null);
     }
@@ -398,6 +414,20 @@ function QuickToolsPage(): JSX.Element {
           </Card>
         </Grid>
       </Grid>
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
+        anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+      >
+        <Alert
+          severity={snackbar.severity}
+          onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
+          sx={{ width: "100%" }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Stack>
   );
 }

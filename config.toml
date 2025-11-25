@@ -1,0 +1,113 @@
+model = "gpt-5.1-codex-max"
+model_reasoning_effort = "high"
+windows_wsl_setup_acknowledged = true
+
+[mcp_servers.playwright]
+url = "http://127.0.0.1:9131/mcp"
+startup_timeout_sec = 90
+tool_timeout_sec = 180
+
+[mcp_servers.jobs]
+command = "C:\\Users\\25113\\AppData\\Roaming\\Python\\Python313\\Scripts\\mcp-background-job.exe"
+args = []
+startup_timeout_sec = 120
+tool_timeout_sec = 300
+env = { MCP_BG_MAX_JOBS = "8", MCP_BG_MAX_OUTPUT_SIZE = "50MB", MCP_BG_JOB_TIMEOUT = "1800", MCP_BG_CLEANUP_INTERVAL = "600", MCP_BG_ALLOWED_COMMANDS = "" }
+
+[mcp_servers.filesystem]
+command = "cmd.exe"
+args = ["/d", "/c", "C:\\Users\\25113\\scoop\\shims\\bunx.exe @modelcontextprotocol/server-filesystem D:\\project"]
+startup_timeout_sec = 90
+tool_timeout_sec = 180
+
+[mcp_servers.git]
+command = "C:\\Users\\25113\\AppData\\Roaming\\Python\\Python313\\Scripts\\mcp-server-git.exe"
+args = []
+startup_timeout_sec = 120
+tool_timeout_sec = 300
+
+[projects.'C:\\Users\\25113']
+trust_level = "trusted"
+
+[projects.'C:\\WINDOWS\\system32']
+trust_level = "trusted"
+
+[projects.'D:\\project\\U6N1']
+trust_level = "trusted"
+
+[projects.'D:\\project\\mimic_codex']
+trust_level = "trusted"
+
+[projects.'D:\\project\\mimic']
+trust_level = "trusted"
+
+[projects.'D:\\project\\DBI_ai_db']
+trust_level = "trusted"
+
+[projects.'D:\\project']
+trust_level = "trusted"
+
+[projects.'C:\Users\25113']
+trust_level = "trusted"
+
+[mcp_servers.postgres]
+command = "node"
+args = ["d:\\project\\mimic_codex\\tools\\postgres_mcp_stdio.mjs"]
+env = { DB_ALIASES = "main", DEFAULT_DB_ALIAS = "main", DB_MAIN_URL = "postgres://codex:codex@127.0.0.1:5432/codex", ENABLE_AUTH = "false", LOG_LEVEL = "error" }
+startup_timeout_sec = 120
+tool_timeout_sec = 300
+
+[mcp_servers.exec_runner]
+command = "node"
+args = ["d:\\project\\4S\\dist\\src\\mcp\\servers\\execRunnerServer.js"]
+startup_timeout_sec = 120
+tool_timeout_sec = 600
+env = { EXEC_RUNNER_ROOT = "D:\\project\\4S" }
+
+[mcp_servers.context7]
+command = "C:\\Program Files\\nodejs\\npx.cmd"
+args = ["-y", "@upstash/context7-mcp@latest"]
+startup_timeout_sec = 120
+tool_timeout_sec = 300
+env = { CONTEXT7_API_KEY = "ctx7sk-259b9132-894a-42c7-bab3-1cfdf738c927" }
+
+[mcp_servers.neo4j_cypher]
+command = "C:\\Users\\25113\\AppData\\Roaming\\Python\\Python313\\Scripts\\mcp-neo4j-cypher.exe"
+args = ["--transport", "stdio"]
+startup_timeout_sec = 120
+tool_timeout_sec = 300
+env = { NEO4J_URI = "bolt://127.0.0.1:7687", NEO4J_USERNAME = "neo4j", NEO4J_PASSWORD = "codex1234", NEO4J_DATABASE = "neo4j", NEO4J_NAMESPACE = "local" }
+
+[mcp_servers.neo4j_memory]
+command = "C:\\Users\\25113\\AppData\\Roaming\\Python\\Python313\\Scripts\\mcp-neo4j-memory.exe"
+args = ["--transport", "stdio"]
+startup_timeout_sec = 120
+tool_timeout_sec = 300
+env = { NEO4J_URI = "bolt://127.0.0.1:7687", NEO4J_USERNAME = "neo4j", NEO4J_PASSWORD = "codex1234", NEO4J_DATABASE = "neo4j", NEO4J_NAMESPACE = "memory" }
+
+[mcp_servers.neo4j_aura]
+command = "C:\\Users\\25113\\AppData\\Roaming\\Python\\Python313\\Scripts\\mcp-neo4j-aura-manager.exe"
+args = ["--transport", "stdio"]
+startup_timeout_sec = 120
+tool_timeout_sec = 300
+env = { NEO4J_AURA_CLIENT_ID = "Cu0kprtZebYPhVZY4AEUtzNqgaf7e3Ux", NEO4J_AURA_CLIENT_SECRET = "xA0ZjI4sRx5s4RFJUpWIyqdzCmHXDdzQNAgnRi51PJAI5IDsL9PFhMnFck61qbN3", NEO4J_NAMESPACE = "aura" }
+
+[mcp_servers.neo4j_data_modeling]
+command = "C:\\Users\\25113\\AppData\\Roaming\\Python\\Python313\\Scripts\\mcp-neo4j-data-modeling.exe"
+args = ["--transport", "stdio"]
+startup_timeout_sec = 120
+tool_timeout_sec = 300
+env = { NEO4J_NAMESPACE = "data_modeling" }
+
+[mcp_servers.next_devtools]
+command = "C:\\Program Files\\nodejs\\npx.cmd"
+args = ["-y", "next-devtools-mcp@latest"]
+startup_timeout_sec = 120
+tool_timeout_sec = 300
+
+[mcp_servers.context_engine]
+command = "D:\\project\\context_engine\\.venv\\Scripts\\python.exe"
+args = ["D:\\project\\context_engine\\mcp\\server.py"]
+working_directory = "D:\\project\\context_engine"
+startup_timeout_sec = 120
+tool_timeout_sec = 300

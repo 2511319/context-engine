@@ -6,8 +6,8 @@ export default defineConfig({
   test: {
     environment: "happy-dom",
     setupFiles: "./vitest.setup.ts",
-    // Reduce flakiness in CI/Windows: avoid worker threads hanging and parallel file runs
-    pool: "forks",
+    // Reduce flakiness in CI/Windows: use threads instead of forks to avoid зависания раннера
+    pool: "threads",
     fileParallelism: false,
     isolate: true,
     testTimeout: 10000,

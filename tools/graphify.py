@@ -3,9 +3,14 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.dal import GraphClient, PgClient
 from core.dal.repos import IngestRepo
@@ -13,6 +18,17 @@ from core.uri import doc_uri, docsection_uri, file_uri, module_uri, symbol_uri
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("context_engine.tools.graphify")
+
+
+def _load_env(env_path: Path) -> None:
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _, value = stripped.partition("=")
+        os.environ[key.strip()] = value.strip()
 
 
 @dataclass
@@ -82,7 +98,7 @@ def apply_graph(graph: GraphClient, project: str, code_rows, doc_rows, symbols, 
             s.run("MERGE (m:Module {project:$p, uri:$u}) SET m.name=$name", p=project, u=mod_uri, name=module_name)
             s.run(
                 "MATCH (f:File {project:$p, uri:$fu}), (m:Module {project:$p, uri:$mu}) "
-                "MERGE (f)-[:PART_OF_MODULE]->(m)",
+                "MERGE (f)-[r:PART_OF_MODULE {project:$p}]->(m)",
                 p=project,
                 fu=uri,
                 mu=mod_uri,
@@ -101,7 +117,7 @@ def apply_graph(graph: GraphClient, project: str, code_rows, doc_rows, symbols, 
             )
             s.run(
                 "MATCH (d:Doc {project:$p, uri:$du}), (ds:DocSection {project:$p, uri:$su}) "
-                "MERGE (d)-[:HAS_SECTION]->(ds)",
+                "MERGE (d)-[r:HAS_SECTION {project:$p}]->(ds)",
                 p=project,
                 du=base_uri,
                 su=section_uri,
@@ -128,7 +144,7 @@ def apply_graph(graph: GraphClient, project: str, code_rows, doc_rows, symbols, 
             if edge_kind == "DEFINED_IN":
                 s.run(
                     "MATCH (a:Symbol {project:$p, uri:$fu}), (b {project:$p, uri:$tu}) "
-                    "MERGE (a)-[:DEFINED_IN]->(b)",
+                    "MERGE (a)-[r:DEFINED_IN {project:$p}]->(b)",
                     p=project,
                     fu=from_uri,
                     tu=to_uri,
@@ -137,7 +153,7 @@ def apply_graph(graph: GraphClient, project: str, code_rows, doc_rows, symbols, 
             elif edge_kind == "USES":
                 s.run(
                     "MATCH (a:Symbol {project:$p, uri:$fu}), (b:Symbol {project:$p, uri:$tu}) "
-                    "MERGE (a)-[:USES]->(b)",
+                    "MERGE (a)-[r:USES {project:$p}]->(b)",
                     p=project,
                     fu=from_uri,
                     tu=to_uri,
@@ -146,7 +162,7 @@ def apply_graph(graph: GraphClient, project: str, code_rows, doc_rows, symbols, 
             elif edge_kind == "DESCRIBED_IN":
                 s.run(
                     "MATCH (a {project:$p, uri:$fu}), (b:DocSection {project:$p, uri:$tu}) "
-                    "MERGE (a)-[:DESCRIBED_IN]->(b)",
+                    "MERGE (a)-[r:DESCRIBED_IN {project:$p}]->(b)",
                     p=project,
                     fu=from_uri,
                     tu=to_uri,
@@ -155,7 +171,25 @@ def apply_graph(graph: GraphClient, project: str, code_rows, doc_rows, symbols, 
             elif edge_kind == "REFERENCES":
                 s.run(
                     "MATCH (a:DocSection {project:$p, uri:$fu}), (b {project:$p, uri:$tu}) "
-                    "MERGE (a)-[:REFERENCES]->(b)",
+                    "MERGE (a)-[r:REFERENCES {project:$p}]->(b)",
+                    p=project,
+                    fu=from_uri,
+                    tu=to_uri,
+                )
+                created["edges"] += 1
+            elif edge_kind == "TESTS":
+                s.run(
+                    "MATCH (a {project:$p, uri:$fu}), (b {project:$p, uri:$tu}) "
+                    "MERGE (a)-[r:TESTS {project:$p}]->(b)",
+                    p=project,
+                    fu=from_uri,
+                    tu=to_uri,
+                )
+                created["edges"] += 1
+            elif edge_kind == "SIMILAR_TO":
+                s.run(
+                    "MATCH (a {project:$p, uri:$fu}), (b {project:$p, uri:$tu}) "
+                    "MERGE (a)-[r:SIMILAR_TO {project:$p}]->(b)",
                     p=project,
                     fu=from_uri,
                     tu=to_uri,
@@ -170,11 +204,12 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
+    _load_env(PROJECT_ROOT / ".env")
     env = Env(
-        pg_dsn=os.getenv("PG_DSN", ""),
-        neo4j_uri=os.getenv("NEO4J_URI", ""),
-        neo4j_user=os.getenv("NEO4J_USER", ""),
-        neo4j_pass=os.getenv("NEO4J_PASS", ""),
+        pg_dsn=(os.getenv("PG_DSN") or os.getenv("PG_DSN_RO") or "").strip(),
+        neo4j_uri=(os.getenv("NEO4J_URI") or os.getenv("NEO4J_URI_RO") or "").strip(),
+        neo4j_user=(os.getenv("NEO4J_USER") or os.getenv("NEO4J_USER_RO") or "").strip(),
+        neo4j_pass=(os.getenv("NEO4J_PASS") or os.getenv("NEO4J_PASS_RO") or "").strip(),
     )
 
     if not env.pg_dsn:

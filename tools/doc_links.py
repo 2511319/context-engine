@@ -63,6 +63,38 @@ def extract_doc_mentions(project: str, doc_name: str, content: str) -> Iterator[
         yield "REFERENCES", file_uri(project, path.lstrip("/"))
 
 
+def extract_module_mentions(project: str, content: str, module_index: dict[str, str]) -> Iterator[Tuple[str, str]]:
+    """
+    Detect mentions of known modules in free text and create REFERENCES to modules.
+    Matching is conservative: whole-word occurrences of module names (as built by module_index).
+    """
+    seen = set()
+    for mod_name, mod_uri in module_index.items():
+        token = re.escape(mod_name)
+        if re.search(rf"\b{token}\b", content):
+            if mod_uri in seen:
+                continue
+            seen.add(mod_uri)
+            yield "REFERENCES", mod_uri
+
+
+def extract_symbol_mentions(content: str, symbol_map: dict[str, str]) -> Iterator[Tuple[str, str]]:
+    """
+    Detect mentions of known symbols by simple-name (exact word match) and create REFERENCES to symbol URIs.
+    Conservative: exact word boundary match on the short name (without module prefix).
+    """
+    seen = set()
+    for name, uri in symbol_map.items():
+        if len(name) < 4:  # skip very short to reduce noise
+            continue
+        token = re.escape(name)
+        if re.search(rf"\b{token}\b", content):
+            if uri in seen:
+                continue
+            seen.add(uri)
+            yield "REFERENCES", uri
+
+
 def _split_anchor(target: str) -> Tuple[str, str]:
     if "#" in target:
         base, anchor = target.split("#", 1)

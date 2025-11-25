@@ -1,0 +1,12 @@
+[mcp_servers.git]
+command = "C:\\Users\\25113\\AppData\\Roaming\\Python\\Python313\\Scripts\\mcp-server-git.exe"
+args = []
+startup_timeout_sec = 120
+tool_timeout_sec = 300
+
+[mcp_servers.context_engine]
+command = "D:\\project\\context_engine\\.venv\\Scripts\\python.exe"
+args = ["D:\\project\\context_engine\\mcp\\server.py"]
+working_directory = "D:\\project\\context_engine"
+startup_timeout_sec = 120
+tool_timeout_sec = 300

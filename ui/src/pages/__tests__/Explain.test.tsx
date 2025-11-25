@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { beforeEach, afterEach, expect, test, vi } from "vitest";
-import ExplainPage from "../../pages/Explain";
+import ExplainLite from "../../pages/ExplainLite";
 import { ProjectProvider } from "../../context/ProjectContext";
 
 let queryClient: QueryClient;
@@ -57,7 +57,7 @@ beforeEach(() => {
     if (href.includes("/plans?")) {
       return {
         ok: true,
-        json: async () => planList
+        json: async () => ({ plans: planList })
       } as Response;
     }
     if (href.includes(`/plans/${planList[0].plan_id}`)) {
@@ -81,7 +81,7 @@ function renderExplain(): void {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <ProjectProvider>
-          <ExplainPage />
+          <ExplainLite />
         </ProjectProvider>
       </BrowserRouter>
     </QueryClientProvider>

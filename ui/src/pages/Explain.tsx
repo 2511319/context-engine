@@ -16,6 +16,7 @@ import {
   ListItemButton,
   ListItemText,
   MenuItem,
+  Snackbar,
   TextField,
   Stack,
   Typography
@@ -36,50 +37,7 @@ import {
 import { API_BASE, apiGet } from "../api/client";
 import { useProject } from "../context/ProjectContext";
 import { useSearchParams } from "react-router-dom";
-
-type PlanListItem = {
-  plan_id: string;
-  ts: string;
-  project: string;
-  module: string | null;
-  status: string;
-  route?: string | null;
-  latency_ms?: number | null;
-};
-
-type Artifact = {
-  uri?: string;
-  path?: string;
-  doc?: string;
-  section?: string;
-  score?: number;
-  sim_vec?: number;
-  sim_bm25?: number;
-  bm25_rank_pos?: number | null;
-  bias_pin?: number;
-  penalty_neg?: number;
-};
-
-type TokenBudget = {
-  budget: number;
-  total_tokens: number;
-  code_tokens: number;
-  doc_tokens: number;
-  truncated_code: number;
-  truncated_docs: number;
-};
-
-type PlanDetail = PlanListItem & {
-  source_latencies?: Record<string, number>;
-  result_sizes?: Record<string, number>;
-  params?: Record<string, any>;
-  token_budget?: TokenBudget | null;
-  detail: {
-    explain?: Record<string, any>;
-    code?: Artifact[];
-    docs?: Artifact[];
-  };
-};
+import { Artifact, PlanDetail, PlanListItem, TokenBudget } from "./Explain.types";
 
 const CHART_COLORS = ["#4dabf5", "#ce93d8", "#ffb74d", "#81c784", "#f48fb1", "#64b5f6"];
 
@@ -122,6 +80,7 @@ function MiniList({ title, items }: { title: string; items: Array<Record<string,
   if (!entries.length) {
     return <Typography variant="body2" color="text.secondary">—</Typography>;
   }
+
   return (
     <Stack spacing={0.5}>
       <Typography variant="subtitle2">{title}</Typography>
@@ -223,6 +182,12 @@ function ExplainPage(): JSX.Element {
   const [rerunHistory, setRerunHistory] = useState<
     { timestamp: string; summary: string; jobId?: string; payload: any }[]
   >([]);
+  const [showRerunResult, setShowRerunResult] = useState(false);
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: "success" | "error" }>({
+    open: false,
+    message: "",
+    severity: "success"
+  });
 
   const {
     data: plansData,
@@ -390,6 +355,8 @@ function ExplainPage(): JSX.Element {
       const json = await resp.json();
       setRerunResult(json);
       setRerunStatus("success");
+      setShowRerunResult(true);
+      setSnackbar({ open: true, message: "get_context завершён успешно", severity: "success" });
       setRerunHistory((prev) => [
         {
           timestamp: new Date().toISOString(),
@@ -401,6 +368,7 @@ function ExplainPage(): JSX.Element {
     } catch (err) {
       setRerunError((err as Error).message);
       setRerunStatus("error");
+      setSnackbar({ open: true, message: (err as Error).message, severity: "error" });
     }
   };
 
@@ -734,13 +702,18 @@ function ExplainPage(): JSX.Element {
                   >
                     {rerunStatus === "running" ? "Running..." : "Run get_context"}
                   </Button>
+                  {rerunResult && (
+                    <Button variant="text" size="small" onClick={() => setShowRerunResult((prev) => !prev)}>
+                      {showRerunResult ? "Скрыть результат" : "Показать результат"}
+                    </Button>
+                  )}
                   {rerunStatus === "success" && rerunSummary && (
                     <Typography variant="body2" color="success.main">
                       {rerunSummary}
                     </Typography>
                   )}
                 </Stack>
-                {rerunResult && (
+                {rerunResult && showRerunResult && (
                   <Box component="pre" sx={{ mt: 2, maxHeight: 240, overflow: "auto" }}>
                     {JSON.stringify(rerunResult, null, 2)}
                   </Box>
@@ -916,6 +889,20 @@ function ExplainPage(): JSX.Element {
           </Stack>
         )}
       </Grid>
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
+        anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+      >
+        <Alert
+          severity={snackbar.severity}
+          onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
+          sx={{ width: "100%" }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Grid>
   );
 }

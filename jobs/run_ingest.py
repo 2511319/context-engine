@@ -14,6 +14,7 @@ def run_step(cmd: list[str], cwd: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run full ingest pipeline")
     parser.add_argument("--project", required=True)
+    parser.add_argument("--repo-root", required=False, help="Override repository root for index_repo step")
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
@@ -24,6 +25,9 @@ def main() -> None:
         [python, str(root / "tools" / "memify.py"), "--project", args.project],
         [python, str(root / "tools" / "graphify.py"), "--project", args.project],
     ]
+
+    if args.repo_root:
+        steps[0].extend(["--repo-root", args.repo_root])
 
     env = os.environ.copy()
     for cmd in steps:

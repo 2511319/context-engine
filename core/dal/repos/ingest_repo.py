@@ -70,6 +70,13 @@ class IngestRepo:
         """
         self._execute(sql, (project, section_uri), cur)
 
+    def delete_edges_by_kind(self, project: str, kinds: Iterable[str], cur=None) -> None:  # type: ignore[no-untyped-def]
+        sql = """
+            DELETE FROM dp_edge
+            WHERE project=%s AND edge_kind = ANY(%s)
+        """
+        self._execute(sql, (project, list(kinds)), cur)
+
     def insert_symbol(
         self,
         project: str,
@@ -97,10 +104,10 @@ class IngestRepo:
         cur=None,  # type: ignore[no-untyped-def]
     ) -> None:
         sql = """
-            INSERT INTO dp_edge(project, edge_kind, from_uri, to_uri, src_uri, dst_uri)
-            VALUES (%s,%s,%s,%s,%s,%s)
+            INSERT INTO dp_edge(project, edge_kind, from_uri, to_uri, src_uri, dst_uri, rel)
+            VALUES (%s,%s,%s,%s,%s,%s,%s)
         """
-        self._execute(sql, (project, edge_kind, from_uri, to_uri, src_uri, dst_uri), cur)
+        self._execute(sql, (project, edge_kind, from_uri, to_uri, src_uri, dst_uri, edge_kind), cur)
 
     def insert_symbol_ref(
         self,
@@ -231,4 +238,3 @@ class IngestRepo:
         with self.cursor() as cur:
             cur.execute(sql, tuple(params))
             return cur.fetchall()
-

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from api.services import health as health_service
+from core.dal.repos.stats_repo import StatsRepo
 
 
 class StubCursor:
@@ -86,14 +87,24 @@ def _stubbed_responses() -> List[Dict[str, Any]]:
         {"fetchone": (4,)},
     ]
 
+class StubPg:
+    def __init__(self, responses: List[Dict[str, Any]]) -> None:
+        self.responses = responses
+        self.calls = 0
+
+    def connect(self) -> StubConnection:
+        self.calls += 1
+        return StubConnection(list(self.responses))
+
+def _setup_repo() -> tuple[StatsRepo, StubPg]:
+    pg = StubPg(_stubbed_responses())
+    return StatsRepo(pg), pg
+
 
 def test_fetch_index_metrics_compiles_extended_stats(monkeypatch):
-    def _fake_get_connection():
-        return StubConnection(_stubbed_responses())
-
-    monkeypatch.setattr(health_service.postgres, "get_connection", _fake_get_connection)
+    repo, pg = _setup_repo()
+    health_service._stats_repo = repo  # type: ignore[attr-defined]
     monkeypatch.setattr(health_service.jobs_service, "list_jobs", lambda project: [{"job_id": "job-1", "status": "success"}])
-    health_service._CACHE.clear()  # type: ignore[attr-defined]
 
     metrics = health_service.fetch_index_metrics("context_engine")
 
@@ -107,21 +118,18 @@ def test_fetch_index_metrics_compiles_extended_stats(monkeypatch):
     assert metrics["feedback"]["ctr_positive"] == 0.6
     assert metrics["near_duplicates"]["pairs"] == 4
     assert metrics["jobs"]["total"] == 1
+    assert pg.calls == 1
+    health_service._stats_repo = None  # type: ignore[attr-defined]
 
 
 def test_fetch_index_metrics_uses_cache(monkeypatch):
-    call_count = {"value": 0}
-
-    def _fake_get_connection():
-        call_count["value"] += 1
-        return StubConnection(_stubbed_responses())
-
-    monkeypatch.setattr(health_service.postgres, "get_connection", _fake_get_connection)
+    repo, pg = _setup_repo()
+    health_service._stats_repo = repo  # type: ignore[attr-defined]
     monkeypatch.setattr(health_service.jobs_service, "list_jobs", lambda project: [])
-    health_service._CACHE.clear()  # type: ignore[attr-defined]
 
     first = health_service.fetch_index_metrics("context_engine")
     second = health_service.fetch_index_metrics("context_engine")
 
     assert first is second
-    assert call_count["value"] == 1
+    assert pg.calls == 1
+    health_service._stats_repo = None  # type: ignore[attr-defined]

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Stack, Typography } from "@mui/material";
+import { Alert, Box, Button, Card, CardActions, CardContent, Chip, CircularProgress, Stack, Typography } from "@mui/material";
+import { Link as RouterLink } from "react-router-dom";
 import { apiGet } from "../api/client";
 import { useProject } from "../context/ProjectContext";
 
@@ -20,13 +21,15 @@ function LivePlansPage(): JSX.Element {
   const { project } = useProject();
   const [offset, setOffset] = useState(0);
   const limit = 20;
+  const isTest = import.meta.env.MODE === "test";
   const { data, isLoading, error, isRefetching, refetch } = useQuery({
     queryKey: ["admin-plans-live", project, offset, limit],
     queryFn: () =>
       apiGet<{ plans: PlanItem[]; limit: number; offset: number; total: number }>(
         `/api/admin/plans?limit=${limit}&offset=${offset}&project=${encodeURIComponent(project)}`
       ),
-    refetchInterval: 5000,
+    refetchInterval: isTest ? false : 5000,
+    refetchOnWindowFocus: !isTest,
   });
 
   const plans = useMemo(() => data?.plans ?? [], [data?.plans]);
@@ -36,6 +39,28 @@ function LivePlansPage(): JSX.Element {
 
   if (isLoading) return <CircularProgress />;
   if (error) return <Alert severity="error">{(error as Error).message}</Alert>;
+  if (!plans.length) {
+    return (
+      <Card>
+        <CardContent>
+          <Stack spacing={1}>
+            <Typography variant="h6">Live Plans</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Планов ещё нет. Запустите get_context через Quick Tools или подождите новых запросов.
+            </Typography>
+            <Stack direction="row" spacing={1}>
+              <Button component={RouterLink} to="/tools" size="small" variant="contained">
+                Открыть Quick Tools
+              </Button>
+              <Button size="small" variant="outlined" onClick={() => refetch()} disabled={isRefetching}>
+                Обновить
+              </Button>
+            </Stack>
+          </Stack>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Box display="flex" flexDirection="column" gap={2}>
@@ -96,6 +121,26 @@ function LivePlansPage(): JSX.Element {
               )}
             </Box>
           </CardContent>
+          <CardActions sx={{ pt: 0, pb: 2, px: 2 }}>
+            <Stack direction="row" spacing={1} flexWrap="wrap">
+              <Button
+                size="small"
+                component={RouterLink}
+                to={`/explain?plan=${plan.plan_id}`}
+                variant="outlined"
+              >
+                Открыть в Explain
+              </Button>
+              <Button
+                size="small"
+                component={RouterLink}
+                to={`/jobs?plan=${plan.plan_id}`}
+                variant="text"
+              >
+                Логи Job
+              </Button>
+            </Stack>
+          </CardActions>
         </Card>
       ))}
     </Box>

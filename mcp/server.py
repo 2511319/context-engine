@@ -18,6 +18,52 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+# Ensure local virtualenv packages are importable even if server launched via system Python.
+_VENV_PATH = _PROJECT_ROOT / ".venv"
+_SITE_PACKAGES_CANDIDATES = [
+    _VENV_PATH / "Lib" / "site-packages",  # Windows
+    _VENV_PATH / "lib" / "site-packages",
+]
+if _VENV_PATH.exists():
+    _SITE_PACKAGES_CANDIDATES.extend(_VENV_PATH.glob("lib/python*/site-packages"))
+
+for candidate in _SITE_PACKAGES_CANDIDATES:
+    if candidate.exists() and str(candidate) not in sys.path:
+        sys.path.insert(0, str(candidate))
+
+try:
+    os.chdir(_PROJECT_ROOT)
+except Exception:
+    pass
+
+
+def _load_env(env_path: Path) -> None:
+    if not env_path.exists():
+        return
+    try:
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            key, _, value = stripped.partition("=")
+            os.environ.setdefault(key.strip(), value.strip())
+    except Exception:
+        pass
+
+
+_load_env(_PROJECT_ROOT / ".env")
+
+def _log_startup(message: str) -> None:
+    try:
+        log_path = _PROJECT_ROOT / "logs" / "mcp-server-start.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as fh:
+            fh.write(f"{datetime.now(timezone.utc).isoformat()} {message}\n")
+    except Exception:
+        pass
+
+_log_startup(f"starting: exe={sys.executable} cwd={Path.cwd()}")
+
 from context_engine.mcp.transport import StdioJSONRPCTransport
 from core.config_loader import ConfigLoader
 from core.config.policy import PolicyLoader
@@ -1214,4 +1260,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:  # pragma: no cover - startup diagnostics
+        error_path = _PROJECT_ROOT / "logs" / "mcp-server-error.log"
+        error_path.parent.mkdir(parents=True, exist_ok=True)
+        error_path.write_text(f"{datetime.now(timezone.utc).isoformat()} {exc}\n", encoding="utf-8")
+        raise
