@@ -500,6 +500,20 @@ class MCPServer:
                 },
                 handler=self._tool_explain_plan,
             ),
+            "health": ToolDefinition(
+                name="health",
+                title="Health",
+                description="Check availability of Postgres and Neo4j.",
+                input_schema={"type": "object", "properties": {}},
+                handler=self._tool_health,
+            ),
+            "jobs_list": ToolDefinition(
+                name="jobs_list",
+                title="List Jobs",
+                description="List recorded background jobs.",
+                input_schema={"type": "object", "properties": {}},
+                handler=self._tool_jobs_list,
+            ),
         }
 
     # ------------------------------------------------------------------ tools
@@ -1166,7 +1180,23 @@ class MCPServer:
             row = rows[0] if rows else None
         if not row:
             raise ToolExecutionError("plan not found", {"plan_id": plan_id})
-        return {"plan_id": row[0], "detail": row[11] if len(row) > 11 else None}
+        plan_id_str = str(row[0]) if row and len(row) > 0 else ""
+        detail = row[11] if len(row) > 11 else None
+        return {"plan_id": plan_id_str, "detail": detail}
+
+    def _tool_health(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        pg_ok = Health.pg_ok(self.env.pg_dsn)
+        neo_ok = Health.neo4j_ok(self.env.neo4j_uri, self.env.neo4j_user, self.env.neo4j_pass)
+        components = [
+            {"name": "postgres", "status": "ok" if pg_ok else "down"},
+            {"name": "neo4j", "status": "ok" if neo_ok else "down"},
+        ]
+        status = "ok" if pg_ok and neo_ok else "down"
+        return {"status": status, "components": components}
+
+    def _tool_jobs_list(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        jobs = self.job_manager.list_jobs()
+        return {"status": "ok", "jobs": jobs}
 
     def _log_plan(
         self,
